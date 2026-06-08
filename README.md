@@ -56,7 +56,7 @@ python3 main.py -load models/10000sess.txt -dontlearn -visual on -speed fast
 # Mode pas à pas pour observer la vision à chaque coup
 python3 main.py -load models/10000sess.txt -dontlearn -step-by-step
 
-# Launcher graphique (configure et lance tout à la souris)
+# Centre de contrôle graphique (lance tous les scénarios à la souris)
 python3 snake.py
 ```
 
@@ -66,16 +66,24 @@ python3 snake.py
 
 Chaque modèle est entraîné depuis zéro avec N sessions (montre la progression).
 
-| Modèle                  | Longueur max atteinte |
-|-------------------------|-----------------------|
-| `models/1sess.txt`      | 3                     |
-| `models/10sess.txt`     | 4                     |
-| `models/100sess.txt`    | 6                     |
-| `models/1000sess.txt`   | 26                    |
-| `models/10000sess.txt`  | 38                    |
+| Modèle                    | Longueur max | Score moyen (200 parties, `-dontlearn`) |
+|---------------------------|--------------|------------------------------------------|
+| `models/1sess.txt`        | 3            | —                                        |
+| `models/10sess.txt`       | 4            | —                                        |
+| `models/100sess.txt`      | 6            | —                                        |
+| `models/1000sess.txt`     | 26           | —                                        |
+| `models/10000sess.txt`    | 38           | +32                                      |
+| `models/100000sess.txt`   | 44           | **+54**                                  |
+| `models/1000000sess.txt`  | 49           | +43                                      |
 
-Cible du sujet : longueur 10. Le modèle 10000 dépasse largement (et survit
-jusqu'à la limite de pas).
+Cible du sujet : longueur 10. Dès `10000sess` on la dépasse largement (et le
+serpent survit jusqu'à la limite de pas).
+
+**Rendements décroissants** : le gain est net jusqu'à `100000sess`, puis la
+Q-table sature (~3200 états atteignables sur un plateau 10×10) et, avec un
+taux d'apprentissage constant (`alpha=0.1`), les valeurs Q oscillent au lieu
+de converger — `1000000sess` n'améliore donc plus la politique en pratique.
+Le **sweet spot est `100000sess`**.
 
 ---
 
@@ -87,7 +95,7 @@ jusqu'à la limite de pas).
 | `environment.py` | Plateau, serpent, pommes, vision, règles, récompenses         |
 | `agent.py`       | Agent Q-learning (Q-table sparse, ε-greedy, save/load JSON)   |
 | `display.py`     | Affichage graphique Pygame du plateau + statistiques          |
-| `snake.py`       | Launcher GUI Pygame (bonus)                                   |
+| `snake.py`       | Centre de contrôle GUI Pygame (bonus, voir ci-dessous)        |
 
 ### État (vision → 12 features)
 
@@ -118,5 +126,26 @@ plateau** : un modèle entraîné en 10×10 fonctionne sur n'importe quelle tail
 ## Bonus
 
 - Taille de plateau variable (`-board-size`), état position-agnostique.
-- Launcher graphique (`snake.py`) avec aperçu de commande en direct.
 - Affichage soigné : grille, panneau de stats, vitesses réglables.
+
+### Centre de contrôle (`snake.py`)
+
+Une interface Pygame unique qui pilote `main.py` pour tous les usages du
+sujet. Chaque action lance `main.py` en sous-processus avec les bons
+arguments, et sa sortie défile en direct dans le journal en bas.
+
+- **Onglet Scénarios** : boutons un-clic — entraîner 1 / 10 / 100 / 1000 /
+  10000 sessions (sauvegarde dans `models/`), regarder le meilleur modèle
+  jouer, mode pas-à-pas, évaluation sur 30 parties.
+- **Onglet Personnalisé** : tous les flags de `main.py` (sliders,
+  menus, cases à cocher) avec aperçu de la commande en temps réel.
+- **Onglet Modèles** : liste de `models/*.txt` avec nombre d'états,
+  epsilon et taille ; boutons *Regarder* / *Évaluer* par modèle.
+
+```bash
+python3 snake.py
+```
+
+> Si `pygame` n'est pas installé dans le Python courant (ex. Python 3.14),
+> `snake.py` se relance automatiquement avec `.venv/bin/python` quand le
+> venv existe ; sinon il affiche un message d'installation clair.

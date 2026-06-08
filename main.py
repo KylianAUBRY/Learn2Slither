@@ -143,6 +143,7 @@ def run(args):
         total_score += session_score
 
         report_every = max(1, sessions // 20)
+        progress_every = max(1, sessions // 200)
         if session % report_every == 0 or session == sessions:
             print(
                 '\r[{:>6}/{}]  length={:>3}  steps={:>4}'
@@ -151,7 +152,7 @@ def run(args):
                     session_score, agent.epsilon, agent.q_table_size
                 )
             )
-        elif not visual:
+        elif not visual and session % progress_every == 0:
             print(
                 '\r  [{:>6}/{}]  steps={:>4}  score={:>8.1f}'.format(
                     session, sessions, env.steps, session_score
