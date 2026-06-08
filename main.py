@@ -75,10 +75,20 @@ def run(args):
 
     display = None
     if visual:
-        from display import GameDisplay
-        display = GameDisplay(
-            board_size=args.board_size, speed=args.speed
-        )
+        try:
+            from display import GameDisplay
+            display = GameDisplay(
+                board_size=args.board_size, speed=args.speed
+            )
+        except ImportError:
+            print(
+                'Avertissement: pygame introuvable, affichage '
+                'graphique desactive.\n'
+                '  Installez-le (pip install pygame) ou utilisez '
+                '-visual off.\n'
+                '  La vision terminal reste affichee.',
+                file=sys.stderr
+            )
 
     max_length = 0
     max_duration = 0
