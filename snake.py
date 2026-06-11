@@ -112,6 +112,7 @@ def hline(surf, y, x0, x1, color=C_LINE, thick=1):
 def find_best_model():
     """Meilleur modele disponible (le plus entraine)."""
     prefer = [
+        'models/100000sess.txt', 'models/1000000sess.txt',
         'models/10000sess.txt', 'models/1000sess.txt',
         'models/100sess.txt', 'models/10sess.txt', 'models/1sess.txt',
     ]
@@ -163,9 +164,10 @@ class Button:
 
 
 class Slider:
-    def __init__(self, x, y, w, lo, hi, value):
+    def __init__(self, x, y, w, lo, hi, value, show_value=True):
         self.x, self.y, self.w = x, y, w
         self.lo, self.hi, self.value = lo, hi, value
+        self.show_value = show_value
         self._drag = False
         self.h = 6
 
@@ -191,8 +193,9 @@ class Slider:
             draw_rect(surf, C_CYAN, (self.x, self.y, fill, self.h), 3)
         tx = self._val_to_x()
         draw_rect(surf, C_ACCENT, (tx - 7, self.y - 7, 14, 20), 4)
-        blit_text(surf, str(self.value), F_SMALL, C_CYAN,
-                  self.x + self.w, self.y - 14, anchor='midright')
+        if self.show_value:
+            blit_text(surf, str(self.value), F_SMALL, C_CYAN,
+                      self.x + self.w, self.y - 14, anchor='midright')
 
 
 class Dropdown:
@@ -407,7 +410,11 @@ class App:
                 pygame.Rect(24 + i * 289, 326, 273, 120))
 
         # --- personnalise : widgets ---
-        self.sl_sessions = Slider(44, 210, 360, 1, 10000, 100)
+        # slider grossier jusqu'a 1M + champ pour saisir un nombre exact
+        self.sl_sessions = Slider(44, 210, 360, 1, 1000000, 100,
+                                  show_value=False)
+        self.ti_sessions = TextInput(300, 172, 104, '100')
+        self.ti_sessions.value = '100'
         self.dd_visual = Dropdown(44, 264, 150, ['on', 'off'], 'on')
         self.dd_speed = Dropdown(
             230, 264, 180, ['slow', 'normal', 'fast', 'max'], 'normal')
@@ -499,7 +506,20 @@ class App:
                                 'off', '-sessions', '30'),
                       'Evaluer : ' + path)
 
+    def _sync_sessions(self):
+        """Garde le slider et le champ de saisie d'accord (1..1000000)."""
+        sl, ti = self.sl_sessions, self.ti_sessions
+        if sl._drag:
+            ti.value = str(sl.value)
+        else:
+            txt = ti.value.strip()
+            if txt.isdigit() and int(txt) >= 1:
+                sl.value = min(1000000, int(txt))
+            elif not ti.active:
+                ti.value = str(sl.value)
+
     def build_custom(self):
+        self._sync_sessions()
         parts = self._cmd('-sessions', str(self.sl_sessions.value))
         parts += ['-visual', self.dd_visual.value]
         if self.dd_visual.value == 'on':
@@ -606,6 +626,7 @@ class App:
             self.dd_speed.handle(ev)
         self.cb_dontlearn.handle(ev)
         self.cb_step.handle(ev)
+        self.ti_sessions.handle(ev)
         self.ti_load.handle(ev)
         self.ti_save.handle(ev)
         if self.btn_load_pick.clicked(ev):
@@ -641,6 +662,7 @@ class App:
             if self.tab == 1:
                 self.sl_sessions.update(mx, my, buttons)
                 self.sl_board.update(mx, my, buttons)
+                self._sync_sessions()
             for b in self._active_buttons():
                 b.update(mx, my)
             self._draw()
@@ -755,6 +777,7 @@ class App:
         blit_text(screen, '-sessions   nombre de parties', F_BODY, C_DIM,
                   44, 178)
         self.sl_sessions.draw(screen)
+        self.ti_sessions.draw(screen)
         blit_text(screen, '-visual', F_BODY, C_DIM, 44, 246)
         blit_text(screen, '-speed', F_BODY, C_DIM, 230, 246)
         self.dd_visual.draw(screen)

@@ -43,6 +43,7 @@ class GameDisplay:
         self.f_md = self._font(13, bold=True)
         self.f_lg = self._font(16, bold=True)
         self.f_ttl = self._font(11, bold=True)
+        self.f_xl = self._font(24, bold=True)
 
     @staticmethod
     def _font(size, bold=False):
@@ -154,6 +155,55 @@ class GameDisplay:
                 if ev.type == pygame.KEYDOWN:
                     if ev.key in (pygame.K_SPACE, pygame.K_RETURN):
                         return
+
+    def show_game_over(
+        self, sessions, max_length, max_duration, avg_score
+    ):
+        """Ecran de fin : recapitulatif du run, attend une touche."""
+        w = self.screen.get_width()
+        h = self.screen.get_height()
+        overlay = pygame.Surface((w, h), pygame.SRCALPHA)
+        overlay.fill((10, 10, 20, 215))
+        self.screen.blit(overlay, (0, 0))
+
+        card = pygame.Rect(0, 0, min(380, w - 32), 236)
+        card.center = (w // 2, h // 2)
+        pygame.draw.rect(self.screen, C_PANEL, card, border_radius=10)
+        pygame.draw.rect(self.screen, C_GRID, card, 1,
+                         border_radius=10)
+
+        self._txt('GAME OVER', self.f_xl, C_RED,
+                  card.centerx, card.top + 34, anchor='center')
+
+        rows = [
+            ('SESSIONS', str(sessions), C_TEXT),
+            ('LONGUEUR MAX', str(max_length), C_TEXT),
+            ('DUREE MAX', '{} pas'.format(max_duration), C_TEXT),
+            ('SCORE MOYEN', '{:.1f}'.format(avg_score), C_ACCENT2),
+        ]
+        y = card.top + 78
+        for label, value, color in rows:
+            self._txt(label, self.f_ttl, C_DIM,
+                      card.left + 24, y, anchor='midleft')
+            self._txt(value, self.f_lg, color,
+                      card.right - 24, y, anchor='midright')
+            y += 32
+
+        self._txt('[ une touche pour fermer ]', self.f_sm, C_STEP,
+                  card.centerx, card.bottom - 20, anchor='center')
+
+        pygame.display.flip()
+        self._wait_any_key()
+
+    @staticmethod
+    def _wait_any_key():
+        """Bloque jusqu'a une touche, un clic ou la fermeture."""
+        while True:
+            ev = pygame.event.wait()
+            if ev.type in (
+                pygame.QUIT, pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN
+            ):
+                return
 
     def _pump_events(self):
         for ev in pygame.event.get():

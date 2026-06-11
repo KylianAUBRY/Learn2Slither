@@ -24,6 +24,38 @@ OPPOSITE = {UP: DOWN, DOWN: UP, LEFT: RIGHT, RIGHT: LEFT}
 ACTION_NAMES = {UP: 'UP', RIGHT: 'RIGHT', DOWN: 'DOWN', LEFT: 'LEFT'}
 ACTIONS = [UP, RIGHT, DOWN, LEFT]
 
+REWARD_GREEN = 20.0
+REWARD_RED = -10.0
+REWARD_STEP = -1.0
+REWARD_DEATH = -100.0
+REWARD_TIMEOUT = -50.0
+
+CLOSE_RATIO = 0.3
+MEDIUM_RATIO = 0.6
+
+# Le placement du serpent (marge de 2) tire randint(2, size - 3),
+# qui doit etre non vide : size >= 5.
+MIN_BOARD_SIZE = 5
+
+
+def _relative_bucket(distance, size):
+    """Distance -> seau 0..3 proportionnel a la taille du plateau."""
+    if distance <= 1:
+        return 0
+    if distance <= CLOSE_RATIO * size:
+        return 1
+    if distance <= MEDIUM_RATIO * size:
+        return 2
+    return 3
+
+
+def _item_bits(distance, size):
+    """Pomme visible -> 2 bits de seau (00 = pas visible)."""
+    if distance is None:
+        return (0, 0)
+    bucket = max(1, _relative_bucket(distance, size))
+    return ((bucket >> 1) & 1, bucket & 1)
+
 
 class Environment:
     """
@@ -35,20 +67,27 @@ class Environment:
     """
 
     def __init__(self, size=10):
+        if size < MIN_BOARD_SIZE:
+            raise ValueError(
+                'taille de plateau minimum: {}'.format(MIN_BOARD_SIZE)
+            )
         self.size = size
-        self.max_steps = size * size * 10
         self.snake = deque()
         self.green_apples = []
         self.red_apples = []
         self.direction = RIGHT
         self.done = False
         self.steps = 0
+        self.steps_since_green = 0
+        self.cause = None
         self.reset()
 
     def reset(self):
         """Demarre une nouvelle session, retourne l'etat initial."""
         self.done = False
         self.steps = 0
+        self.steps_since_green = 0
+        self.cause = None
         self._place_snake()
         self._place_apples()
         return self.get_state()
@@ -105,8 +144,9 @@ class Environment:
         Deplace le serpent dans la direction action.
         Retourne (next_state, reward, done).
 
-        Recompenses: +10 pomme verte, -10 pomme rouge,
-                     -0.1 deplacement normal, -100 game over.
+        Recompenses: +20 pomme verte, -10 pomme rouge,
+                     -1 deplacement normal, -100 game over,
+                     -50 timeout (boucle sans manger).
         """
         if action == OPPOSITE[self.direction]:
             action = self.direction
@@ -116,12 +156,14 @@ class Environment:
 
         if not (0 <= nr < self.size and 0 <= nc < self.size):
             self.done = True
-            return self.get_state(), -100.0, True
+            self.cause = 'wall'
+            return self.get_state(), REWARD_DEATH, True
 
         body_no_tail = set(list(self.snake)[:-1])
         if (nr, nc) in body_no_tail:
             self.done = True
-            return self.get_state(), -100.0, True
+            self.cause = 'self'
+            return self.get_state(), REWARD_DEATH, True
 
         self.snake.appendleft((nr, nc))
 
@@ -130,7 +172,8 @@ class Environment:
             cell = self._free_cell()
             if cell:
                 self.green_apples.append(cell)
-            reward = 10.0
+            reward = REWARD_GREEN
+            self.steps_since_green = 0
 
         elif (nr, nc) in self.red_apples:
             self.red_apples.remove((nr, nc))
@@ -141,59 +184,75 @@ class Environment:
             self.snake.pop()
             if len(self.snake) == 0:
                 self.done = True
-                return tuple([1, 0, 0] * 4), -100.0, True
-            reward = -10.0
+                self.cause = 'length_zero'
+                return self.get_state(), REWARD_DEATH, True
+            reward = REWARD_RED
+            self.steps_since_green += 1
 
         else:
             self.snake.pop()
-            reward = -0.1
+            reward = REWARD_STEP
+            self.steps_since_green += 1
 
         self.direction = action
         self.steps += 1
-        if self.steps >= self.max_steps:
-            return self.get_state(), 0.0, True
+
+        limit = max(100, 100 * len(self.snake))
+        if self.steps_since_green > limit:
+            self.done = True
+            self.cause = 'timeout'
+            return self.get_state(), REWARD_TIMEOUT, True
+
         return self.get_state(), reward, False
 
     def get_state(self):
         """
-        Etat compact derive des rayons visuels.
+        Etat compact derive de la vision en croix (16 bits).
 
-        Pour chaque direction (N, E, S, W):
-          danger : distance au premier obstacle (mur ou corps),
-                   plafonnee a 3  (1=immediat, 2=proche, 3=loin)
-          has_g  : 1 si pomme verte dans le rayon
-          has_r  : 1 si pomme rouge dans le rayon
+        Pour chaque direction (haut, droite, bas, gauche), 4 bits :
+          bits 0-1 : distance au premier obstacle (mur ou corps),
+                     en seau proportionnel a la taille du plateau ;
+          bits 2-3 : distance a la pomme verte la plus proche visible
+                     (00 = aucune), en seau proportionnel.
 
-        12 elements normalises par rapport a la taille du plateau,
-        ce qui rend l'etat independant de la taille du plateau.
+        Distances relatives -> etat independant de la taille du
+        plateau. Les pommes rouges sont volontairement absentes :
+        une variante 24 bits les encodant a ete entrainee et mesuree
+        moins bonne (espace d'etats x7, apprentissage fragmente pour
+        un benefice marginal).
         """
+        if not self.snake:
+            return tuple([0] * 16)
+
         hr, hc = self.snake[0]
-        snake_set = frozenset(self.snake)
-        green_set = frozenset(self.green_apples)
-        red_set = frozenset(self.red_apples)
-        enc = []
+        body = set(list(self.snake)[1:])
+        green = set(self.green_apples)
+        size = self.size
+        features = []
 
-        for dr, dc in [DELTA[UP], DELTA[RIGHT], DELTA[DOWN], DELTA[LEFT]]:
-            has_g = 0
-            has_r = 0
-            body_dist = 0
-            r, c = hr + dr, hc + dc
-            dist = 1
-            while 0 <= r < self.size and 0 <= c < self.size:
-                if body_dist == 0 and (r, c) in snake_set:
-                    body_dist = dist
-                if (r, c) in green_set:
-                    has_g = 1
-                if (r, c) in red_set:
-                    has_r = 1
-                r += dr
-                c += dc
-                dist += 1
-            wall_dist = dist
-            danger = body_dist if body_dist > 0 else wall_dist
-            enc.extend([min(danger, 3), has_g, has_r])
+        for dr, dc in [DELTA[UP], DELTA[RIGHT], DELTA[DOWN],
+                       DELTA[LEFT]]:
+            obstacle_dist = None
+            green_dist = None
+            for dist in range(1, size + 1):
+                r, c = hr + dr * dist, hc + dc * dist
+                if not (0 <= r < size and 0 <= c < size):
+                    if obstacle_dist is None:
+                        obstacle_dist = dist
+                    break
+                if (r, c) in body and obstacle_dist is None:
+                    obstacle_dist = dist
+                if (r, c) in green and green_dist is None:
+                    green_dist = dist
+            if obstacle_dist is None:
+                obstacle_dist = size
 
-        return tuple(enc)
+            ob_b = _relative_bucket(obstacle_dist, size)
+            features.append((ob_b >> 1) & 1)
+            features.append(ob_b & 1)
+            features.extend(_item_bits(green_dist, size))
+
+        return tuple(features)
 
     def get_vision_rays(self):
         """Rayons visuels complets pour l'affichage terminal."""

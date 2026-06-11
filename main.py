@@ -12,8 +12,28 @@ import argparse
 import os
 import sys
 
-from environment import Environment, ACTION_NAMES
+from environment import (
+    Environment, ACTION_NAMES, OPPOSITE, MIN_BOARD_SIZE
+)
 from agent import QAgent
+
+
+def board_size_type(value):
+    """Valide -board-size : entier >= MIN_BOARD_SIZE."""
+    size = int(value)
+    if size < MIN_BOARD_SIZE:
+        raise argparse.ArgumentTypeError(
+            'taille minimum: {}'.format(MIN_BOARD_SIZE)
+        )
+    return size
+
+
+def sessions_type(value):
+    """Valide -sessions : entier >= 1."""
+    n = int(value)
+    if n < 1:
+        raise argparse.ArgumentTypeError('minimum 1 session')
+    return n
 
 
 def parse_args():
@@ -21,8 +41,8 @@ def parse_args():
         description='Learn2Slither - Snake Reinforcement Learning'
     )
     p.add_argument(
-        '-sessions', type=int, default=100,
-        help='Nombre de sessions (defaut: 100)'
+        '-sessions', type=sessions_type, default=100,
+        help='Nombre de sessions (defaut: 100, min: 1)'
     )
     p.add_argument(
         '-visual', choices=['on', 'off'], default='on',
@@ -51,8 +71,11 @@ def parse_args():
         help='Mode pas a pas (SPACE pour avancer)'
     )
     p.add_argument(
-        '-board-size', dest='board_size', type=int, default=10,
-        help='Taille plateau NxN (defaut: 10) [BONUS]'
+        '-board-size', dest='board_size', type=board_size_type,
+        default=10,
+        help='Taille plateau NxN (defaut: 10, min: {}) [BONUS]'.format(
+            MIN_BOARD_SIZE
+        )
     )
     return p.parse_args()
 
@@ -106,12 +129,16 @@ def run(args):
 
     for session in range(1, sessions + 1):
         state = env.reset()
+        last_action = env.direction
         done = False
         session_score = 0.0
         action_name = ''
 
         while not done:
             action = agent.choose_action(state)
+            if action == OPPOSITE[last_action]:
+                action = last_action
+            last_action = action
             action_name = ACTION_NAMES[action]
 
             if visual:
@@ -173,6 +200,12 @@ def run(args):
         agent.save(args.save)
 
     if display:
+        display.show_game_over(
+            sessions=sessions,
+            max_length=max_length,
+            max_duration=max_duration,
+            avg_score=total_score / sessions,
+        )
         display.close()
 
 

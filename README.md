@@ -42,7 +42,7 @@ python3 main.py [options]
 | `-save FILE`     | —        | Sauvegarder le modèle à la fin                       |
 | `-dontlearn`     | off      | Désactive l'apprentissage (exploitation pure)        |
 | `-step-by-step`  | off      | Avance pas à pas (SPACE)                              |
-| `-board-size N`  | `10`     | Taille du plateau N×N **[bonus]**                    |
+| `-board-size N`  | `10`     | Taille du plateau N×N, minimum 5 **[bonus]**         |
 
 ### Exemples
 
@@ -62,28 +62,65 @@ python3 snake.py
 
 ---
 
+## Entraînement (`train.py`)
+
+`main.py` joue / entraîne sur **une seule** taille. Pour produire les modèles
+fournis on utilise `train.py` : il entraîne **un seul** agent en continu et
+sauvegarde des **instantanés** de la Q-table aux paliers demandés.
+
+```bash
+# Échelle complète, une seule taille (10×10)
+python3 train.py -sessions 100000 \
+                 -snapshots 1 10 100 1000 10000 100000
+
+# Multi-tailles (bonus « taille variable ») : une seule Q-table qui
+# joue ensuite sur 8×8 … 20×20 … et au-delà (~9 min)
+python3 train.py -sessions 100000 -sizes 8 10 12 15 20 \
+                 -snapshots 1 10 100 1000 10000 100000
+```
+
+Comme l'état encode des distances **relatives** à la taille du plateau, tirer
+une taille au hasard à chaque session (`-sizes`) apprend une politique qui
+**généralise** : le même `.txt` joue correctement sur n'importe quelle taille
+sans ré-entraînement. Un modèle entraîné seulement en 10×10 grossit certes
+beaucoup sur grande carte, mais erre (il met ~3× plus de pas par pomme) ; le
+multi-tailles corrige cette navigation.
+
+---
+
 ## Modèles fournis
 
-Chaque modèle est entraîné depuis zéro avec N sessions (montre la progression).
+Les modèles sont générés par `train.py` : **un seul** agent entraîné en
+continu en **multi-tailles** (`-sizes 8 10 12 15 20`), avec un instantané
+sauvegardé à chaque palier. Les distances étant relatives, le même `.txt`
+joue sur n'importe quelle taille.
 
-| Modèle                    | Longueur max | Score moyen (200 parties, `-dontlearn`) |
-|---------------------------|--------------|------------------------------------------|
-| `models/1sess.txt`        | 3            | —                                        |
-| `models/10sess.txt`       | 4            | —                                        |
-| `models/100sess.txt`      | 6            | —                                        |
-| `models/1000sess.txt`     | 26           | —                                        |
-| `models/10000sess.txt`    | 38           | +32                                      |
-| `models/100000sess.txt`   | 44           | **+54**                                  |
-| `models/1000000sess.txt`  | 49           | +43                                      |
+Mesures sur **200 sessions** par modèle (10×10, `-dontlearn`), longueur en
+fin de session :
 
-Cible du sujet : longueur 10. Dès `10000sess` on la dépasse largement (et le
-serpent survit jusqu'à la limite de pas).
+| Modèle                   | Long. moyenne | Fin ≥ 10 | Record |
+|--------------------------|---------------|----------|--------|
+| `models/1sess.txt`       | 3.1           | 0 %      | 5      |
+| `models/10sess.txt`      | 3.1           | 0 %      | 5      |
+| `models/100sess.txt`     | 3.2           | 0 %      | 5      |
+| `models/1000sess.txt`    | 4.1           | 0 %      | 9      |
+| `models/10000sess.txt`   | 15.8          | 80 %     | 37     |
+| `models/100000sess.txt`  | **23.5**      | **99.5 %** | **38** |
 
-**Rendements décroissants** : le gain est net jusqu'à `100000sess`, puis la
-Q-table sature (~3200 états atteignables sur un plateau 10×10) et, avec un
-taux d'apprentissage constant (`alpha=0.1`), les valeurs Q oscillent au lieu
-de converger — `1000000sess` n'améliore donc plus la politique en pratique.
-Le **sweet spot est `100000sess`**.
+Cible du sujet : longueur 10 en fin de session (critère d'évaluation :
+plus de 50 % des parties) — le modèle final y est à 99.5 %. La politique
+ne devient performante qu'à partir de `~10000sess` ; `100000sess` est le
+**sweet spot** (au-delà, la Q-table dérive, voir Hyperparamètres).
+
+**Sur grande carte**, le même `100000sess.txt` sans réentraînement :
+moyenne 31.6 en 15×15 (record 60), 38.9 en 20×20 (record 61), 53.8 en
+30×30 (record 88). Le serpent grossit davantage (plus de place) mais
+**erre** : avec la vision en croix, les 2 pommes d'un plateau 30×30 sont
+hors des 4 rayons ~87 % du temps, donc invisibles. Il cherche à l'aveugle
+et meurt surtout en se mordant. C'est le plafond intrinsèque de la vision
+en croix, pas un défaut d'entraînement — l'entraînement multi-tailles ne
+change pas l'efficacité (mesuré) ; il sert à valider le bonus « taille
+variable ».
 
 ---
 
@@ -91,42 +128,67 @@ Le **sweet spot est `100000sess`**.
 
 | Fichier          | Rôle                                                          |
 |------------------|---------------------------------------------------------------|
-| `main.py`        | Point d'entrée CLI, boucle d'entraînement                     |
+| `main.py`        | Point d'entrée CLI, boucle de jeu / entraînement (1 taille)   |
+| `train.py`       | Entraînement headless : snapshots progressifs + multi-tailles |
 | `environment.py` | Plateau, serpent, pommes, vision, règles, récompenses         |
 | `agent.py`       | Agent Q-learning (Q-table sparse, ε-greedy, save/load JSON)   |
 | `display.py`     | Affichage graphique Pygame du plateau + statistiques          |
 | `snake.py`       | Centre de contrôle GUI Pygame (bonus, voir ci-dessous)        |
 
-### État (vision → 12 features)
+### État (vision → 16 bits)
 
-Pour chacune des 4 directions (haut, droite, bas, gauche) :
+Pour chacune des 4 directions (haut, droite, bas, gauche), **4 bits** :
 
-- **danger** : distance au premier obstacle (mur ou corps), plafonnée à 3 ;
-- **pomme verte** visible dans le rayon (0/1) ;
-- **pomme rouge** visible dans le rayon (0/1).
+- **bits 0-1 — distance à l'obstacle** (mur ou corps le plus proche), en
+  seau proportionnel à la taille : `00` collé, `01` proche (≤ 30 %),
+  `10` moyen (≤ 60 %), `11` dégagé ;
+- **bits 2-3 — distance à la pomme verte** la plus proche visible
+  (`00` = aucune), même découpage en seaux.
 
-L'état est dérivé uniquement de la vision et est **indépendant de la taille du
-plateau** : un modèle entraîné en 10×10 fonctionne sur n'importe quelle taille.
+Encoder des **distances graduées** (et non juste « visible / pas visible »)
+permet au serpent de viser la pomme la plus proche et d'anticiper les
+obstacles 2-3 coups à l'avance. Les distances étant **relatives** à la
+taille du plateau, un modèle entraîné en 10×10 fonctionne sur n'importe
+quelle taille. Les pommes rouges sont **volontairement absentes** de
+l'état : une variante 24 bits les encodant a été entraînée et mesurée
+moins bonne (espace d'états ×7 — 62 k états contre 9 k —, apprentissage
+fragmenté pour un bénéfice marginal).
 
 ### Récompenses
 
-| Événement      | Récompense |
-|----------------|------------|
-| Pomme verte    | +10        |
-| Pomme rouge    | −10        |
-| Déplacement    | −0.1       |
-| Game over      | −100       |
+| Événement              | Récompense |
+|------------------------|------------|
+| Pomme verte            | +20        |
+| Pomme rouge            | −10        |
+| Déplacement            | −1         |
+| Game over (mur / soi)  | −100       |
+| Timeout (boucle)       | −50        |
+
+Anti-boucle : une session s'arrête si plus de `100 × longueur` pas
+s'écoulent sans manger de pomme verte.
 
 ### Hyperparamètres
 
-`alpha=0.1`, `gamma=0.9`, `epsilon` 1.0 → 0.05 (decay 0.995).
+`alpha=0.1`, `gamma=0.95`, `epsilon` 1.0 → 0.01 (decay 0.9998 par session).
+
+> Le decay lent (0.9998) maintient l'exploration : epsilon n'atteint son
+> plancher (0.01) que vers ~23 000 sessions. Un plancher bas compte pour
+> les grandes longueurs : à ε = 0.1, un coup sur dix est aléatoire et tue
+> le serpent avant qu'il n'atteigne (donc n'apprenne) les états de
+> longueur 30+. Les petits modèles (`1`…`1000sess`) explorent encore
+> beaucoup ; la politique ne devient performante qu'à partir de
+> `~10000sess`. Au-delà de ~100 000 sessions la performance **redescend**
+> lentement (mesuré à 200k/300k/600k : α constant + quasi-exploitation
+> font dériver la Q-table) — l'échelle s'arrête donc à `100000sess`,
+> le sweet spot mesuré.
 
 ---
 
 ## Bonus
 
 - Taille de plateau variable (`-board-size`), état position-agnostique.
-- Affichage soigné : grille, panneau de stats, vitesses réglables.
+- Affichage soigné : grille, panneau de stats, vitesses réglables, écran de
+  fin (récapitulatif sessions / longueur max / durée max / score moyen).
 
 ### Centre de contrôle (`snake.py`)
 
